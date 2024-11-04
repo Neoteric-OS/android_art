@@ -376,7 +376,7 @@ class EXPORT ClassLinker {
       REQUIRES_SHARED(Locks::mutator_lock_)
       REQUIRES(!Locks::dex_lock_, !Roles::uninterruptible_);
 
-  ArtMethod* ResolveMethodWithoutInvokeType(uint32_t method_idx,
+  ArtMethod* ResolveMethodId(uint32_t method_idx,
                                             Handle<mirror::DexCache> dex_cache,
                                             Handle<mirror::ClassLoader> class_loader)
       REQUIRES_SHARED(Locks::mutator_lock_)
