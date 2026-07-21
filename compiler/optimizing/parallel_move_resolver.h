@@ -159,6 +159,15 @@ class ParallelMoveResolverNoSwap : public ParallelMoveResolver {
   // Emit a move.
   virtual void EmitMove(size_t index) = 0;
 
+  // Whether `constant` is rematerialized by (at most) a single trivially
+  // cheap instruction, making it pointless to rewrite later moves of the
+  // same constant into a copy of an already-materialized register: the
+  // rewrite would save nothing and only add a register dependency. The
+  // default covers zero bit patterns, which every architecture
+  // materializes with one instruction; backends can extend this with
+  // their single-instruction immediate ranges.
+  virtual bool IsCheapConstant(HConstant* constant) const;
+
   // Return a scratch location from the moves which exactly matches the kind.
   // Return Location::NoLocation() if no matching scratch location can be found.
   Location GetScratchLocation(Location::Kind kind);
@@ -178,7 +187,7 @@ class ParallelMoveResolverNoSwap : public ParallelMoveResolver {
   // dependencies).
   void PerformMove(size_t index);
 
-  void UpdateMoveSource(Location from, Location to);
+  void UpdateMoveSource(Location from, Location to, bool stack_destinations_only = false);
 
   void AddPendingMove(Location source, Location destination, DataType::Type type);
 

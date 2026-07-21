@@ -1317,6 +1317,36 @@ void ParallelMoveResolverARM64::EmitMove(size_t index) {
   codegen_->MoveLocation(move->GetDestination(), move->GetSource(), DataType::Type::kVoid);
 }
 
+bool ParallelMoveResolverARM64::IsCheapConstant(HConstant* constant) const {
+  // Everything the macro assembler materializes with a single instruction:
+  // zero registers, MOVZ, MOVN and logical-immediate ORR for core constants
+  // (mirroring the checks of MacroAssembler::Mov()), and FMOV-encodable
+  // immediates for FP constants. Multi-instruction materializations
+  // (MOVZ+MOVK chains, literal pool loads) keep the register reuse.
+  if (constant->IsZeroBitPattern()) {
+    return true;
+  }
+  if (constant->IsIntConstant() || constant->IsLongConstant()) {
+    uint64_t value;
+    unsigned reg_size;
+    if (constant->IsIntConstant()) {
+      value = static_cast<uint32_t>(constant->AsIntConstant()->GetValue());
+      reg_size = kWRegSize;
+    } else {
+      value = static_cast<uint64_t>(constant->AsLongConstant()->GetValue());
+      reg_size = kXRegSize;
+    }
+    return vixl::aarch64::Assembler::IsImmMovz(value, reg_size) ||
+           vixl::aarch64::Assembler::IsImmMovn(value, reg_size) ||
+           vixl::aarch64::Assembler::IsImmLogical(value, reg_size);
+  }
+  if (constant->IsFloatConstant()) {
+    return vixl::aarch64::Assembler::IsImmFP32(constant->AsFloatConstant()->GetValue());
+  }
+  DCHECK(constant->IsDoubleConstant());
+  return vixl::aarch64::Assembler::IsImmFP64(constant->AsDoubleConstant()->GetValue());
+}
+
 void LocationsBuilderARM64::VisitMethodExitHook(HMethodExitHook* method_hook) {
   LocationSummary* locations =
       LocationSummary::Create(allocator_, method_hook, LocationSummary::kCallOnSlowPath);

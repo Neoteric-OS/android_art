@@ -348,7 +348,22 @@ void ParallelMoveResolverNoSwap::EmitNativeCode(HParallelMove* parallel_move) {
       // Updated moves:
       //   1234.5678 -> D0
       //   D0 -> D1
-      UpdateMoveSource(source, destination);
+      //
+      // Skip the update for constants that rematerialize as one trivially
+      // cheap instruction (see IsCheapConstant()): turning a later
+      // (C -> reg2) into (reg1 -> reg2) then saves nothing and only adds
+      // a register dependency (e.g. on arm64 a MOVZ+ORR chain where two
+      // independent MOVZs would do). Stack destinations are the exception:
+      // there a register store still beats materializing the constant into
+      // a temporary, so nonzero cheap constants keep the reuse for those
+      // (zero does not need it; it is stored directly from the zero
+      // register). Note that a move in this loop can have a register source
+      // if an earlier iteration rewrote it with UpdateMoveSource().
+      if (!source.IsConstant() || !IsCheapConstant(source.GetConstant())) {
+        UpdateMoveSource(source, destination);
+      } else if (!source.GetConstant()->IsZeroBitPattern()) {
+        UpdateMoveSource(source, destination, /* stack_destinations_only= */ true);
+      }
     }
   }
 
@@ -370,6 +385,10 @@ void ParallelMoveResolverNoSwap::EmitNativeCode(HParallelMove* parallel_move) {
   moves_.clear();
   scratches_.clear();
   move_destinations_.clear();
+}
+
+bool ParallelMoveResolverNoSwap::IsCheapConstant(HConstant* constant) const {
+  return constant->IsZeroBitPattern();
 }
 
 Location ParallelMoveResolverNoSwap::GetScratchLocation(Location::Kind kind) {
@@ -512,7 +531,9 @@ void ParallelMoveResolverNoSwap::PerformMove(size_t index) {
   }
 }
 
-void ParallelMoveResolverNoSwap::UpdateMoveSource(Location from, Location to) {
+void ParallelMoveResolverNoSwap::UpdateMoveSource(Location from,
+                                                  Location to,
+                                                  bool stack_destinations_only) {
   // This function is used to reduce the dependencies in the graph after
   // (from -> to) has been performed. Since we ensure there is no move with the same
   // destination, (to -> X) cannot be blocked while (from -> X) might still be
@@ -544,7 +565,17 @@ void ParallelMoveResolverNoSwap::UpdateMoveSource(Location from, Location to) {
       return;
     }
   }
+  // With `stack_destinations_only` set, only moves to stack slots are updated;
+  // see the constant-source update in EmitNativeCode().
   for (MoveOperands* move : moves_) {
+    if (stack_destinations_only) {
+      Location destination = move->GetDestination();
+      if (!destination.IsStackSlot() &&
+          !destination.IsDoubleStackSlot() &&
+          !destination.IsSIMDStackSlot()) {
+        continue;
+      }
+    }
     if (move->GetSource().Equals(from)) {
       move->SetSource(to);
     }

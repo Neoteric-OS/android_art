@@ -638,6 +638,7 @@ class ParallelMoveResolverARM64 : public ParallelMoveResolverNoSwap {
   Location AllocateScratchLocationFor(Location::Kind kind) override;
   void FreeScratchLocation(Location loc) override;
   void EmitMove(size_t index) override;
+  bool IsCheapConstant(HConstant* constant) const override;
 
  private:
   Arm64Assembler* GetAssembler() const;
