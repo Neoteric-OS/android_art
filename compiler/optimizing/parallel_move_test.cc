@@ -208,6 +208,34 @@ TYPED_TEST(ParallelMoveTest, Dependency) {
   }
 }
 
+TYPED_TEST(ParallelMoveTest, FanOut) {
+  CallocArenaPool pool;
+  ArenaAllocator allocator(&pool);
+
+  {
+    // A register source that is never overwritten stays valid throughout, so
+    // the copies must remain independent instead of being chained.
+    TypeParam resolver(&allocator);
+    static constexpr size_t moves[][2] = {{0, 1}, {0, 2}, {0, 3}};
+    resolver.EmitNativeCode(BuildParallelMove(&allocator, moves, arraysize(moves)));
+    ASSERT_STREQ("(0 -> 1) (0 -> 2) (0 -> 3)", resolver.GetMessage().c_str());
+  }
+
+  {
+    // When the fanned-out source is also a destination it may be part of a
+    // dependency cycle, so the no-swap resolver still redirects readers to
+    // the emitted copy.
+    TypeParam resolver(&allocator);
+    static constexpr size_t moves[][2] = {{0, 1}, {0, 2}, {4, 0}};
+    resolver.EmitNativeCode(BuildParallelMove(&allocator, moves, arraysize(moves)));
+    if (TestFixture::has_swap) {
+      ASSERT_STREQ("(0 -> 1) (0 -> 2) (4 -> 0)", resolver.GetMessage().c_str());
+    } else {
+      ASSERT_STREQ("(0 -> 1) (1 -> 2) (4 -> 0)", resolver.GetMessage().c_str());
+    }
+  }
+}
+
 TYPED_TEST(ParallelMoveTest, Cycle) {
   CallocArenaPool pool;
   ArenaAllocator allocator(&pool);

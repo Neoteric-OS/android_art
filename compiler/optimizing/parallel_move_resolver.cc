@@ -16,6 +16,8 @@
 
 #include "parallel_move_resolver.h"
 
+#include <algorithm>
+
 #include "base/stl_util.h"
 #include "nodes.h"
 
@@ -303,12 +305,20 @@ void ParallelMoveResolverNoSwap::EmitNativeCode(HParallelMove* parallel_move) {
   DCHECK_EQ(GetNumberOfPendingMoves(), 0u);
   DCHECK(moves_.empty());
   DCHECK(scratches_.empty());
+  DCHECK(move_destinations_.empty());
 
   // Backend dependent initialization.
   PrepareForEmitNativeCode();
 
   // Build up a worklist of moves.
   BuildInitialMoveList(parallel_move);
+
+  // Snapshot the locations this parallel move writes; UpdateMoveSource() uses
+  // them to tell sources that may participate in a dependency cycle from
+  // sources that stay valid throughout.
+  for (const MoveOperands* move : moves_) {
+    move_destinations_.push_back(move->GetDestination());
+  }
 
   for (size_t i = 0; i < moves_.size(); ++i) {
     const MoveOperands& move = *moves_[i];
@@ -359,6 +369,7 @@ void ParallelMoveResolverNoSwap::EmitNativeCode(HParallelMove* parallel_move) {
 
   moves_.clear();
   scratches_.clear();
+  move_destinations_.clear();
 }
 
 Location ParallelMoveResolverNoSwap::GetScratchLocation(Location::Kind kind) {
@@ -513,6 +524,26 @@ void ParallelMoveResolverNoSwap::UpdateMoveSource(Location from, Location to) {
   // This is not something we must do, but we can use fewer scratch locations with
   // this trick. For example, we can avoid using additional scratch locations for
   // moves (0 -> 1), (1 -> 2), (1 -> 0).
+  //
+  // The rewrite is only useful when `from` can be overwritten while still needed
+  // as a source (it is a destination of this parallel move, i.e. potentially part
+  // of a dependency cycle) or when reading `from` again is more expensive than
+  // reading its copy (stack slot and constant sources). For a register source
+  // this parallel move never overwrites, the rewrite would only chain
+  // otherwise-independent copies:
+  //   Original moves:      Updated moves:
+  //     R0 -> R1             R0 -> R1
+  //     R0 -> R2             R1 -> R2
+  // serializing the two for no benefit, so keep the original source. Scratch
+  // locations must keep the rewrite: a scratch may be freed and reused within
+  // this parallel move, so readers are redirected to a copy that outlives it.
+  if (from.IsRegisterKind()) {
+    auto overlaps_from = [from](Location loc) { return loc.OverlapsWith(from); };
+    if (std::none_of(move_destinations_.begin(), move_destinations_.end(), overlaps_from) &&
+        std::none_of(scratches_.begin(), scratches_.end(), overlaps_from)) {
+      return;
+    }
+  }
   for (MoveOperands* move : moves_) {
     if (move->GetSource().Equals(from)) {
       move->SetSource(to);

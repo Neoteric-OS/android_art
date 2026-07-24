@@ -126,9 +126,11 @@ class ParallelMoveResolverNoSwap : public ParallelMoveResolver {
   explicit ParallelMoveResolverNoSwap(ArenaAllocator* allocator)
       : ParallelMoveResolver(allocator),
         scratches_(allocator->Adapter(kArenaAllocParallelMoveResolver)),
+        move_destinations_(allocator->Adapter(kArenaAllocParallelMoveResolver)),
         pending_moves_(allocator->Adapter(kArenaAllocParallelMoveResolver)),
         allocator_(allocator) {
     scratches_.reserve(32);
+    move_destinations_.reserve(32);
     pending_moves_.reserve(8);
   }
   virtual ~ParallelMoveResolverNoSwap() {}
@@ -190,6 +192,11 @@ class ParallelMoveResolverNoSwap : public ParallelMoveResolver {
 
   // Return the number of pending moves.
   size_t GetNumberOfPendingMoves();
+
+  // Destinations of the current parallel move, snapshotted before any move is
+  // performed. Used by UpdateMoveSource() to recognize sources that are never
+  // overwritten and therefore need no rewriting.
+  ArenaVector<Location> move_destinations_;
 
   // Additional pending moves which might be added to resolve dependency cycle.
   ArenaVector<MoveOperands*> pending_moves_;
